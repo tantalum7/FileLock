@@ -11,24 +11,25 @@ class FileLockException(Exception):
 
 class FileLock(object):
 
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, uuid_string: str=None):
         """
-        A file locking mechanism that has context-manager support so
-        you can use it in a with statement. This should be relatively cross
-        compatible as it doesn't rely on msvcrt or fcntl for the locking.
+        Simple file locking primitive. Works be creating a .lock version of the file it's locking, and stores a unique
+        ID inside. Can pass an existing uuid_string to recreate an existing lock.
 
-        Specify the file to lock and optionally the maximum timeout and the delay
-        between each attempt to lock.
-        :param file_name:
-        :param timeout:
-        :param delay:
+        :param file_path:
+        :param uuid_string:
         """
         self._is_locked = False
         self._lockfile = os.path.join(os.path.dirname(file_path), os.path.basename(file_path)+".lock")
-        self.uuid = str(uuid.uuid4())
+        self.uuid = str(uuid.uuid4()) if not uuid_string else uuid_string
 
     @property
     def is_locked(self) -> bool:
+        """
+        Returns true if this instance has the lock. This check requires opening the lock file, and does not refer to
+        an internal state for lock status.
+        :return:
+        """
         # Try to open the lock file, if it exists then return true if it contents our uuid
         try:
             with open(self._lockfile, "r") as fp:
@@ -38,17 +39,11 @@ class FileLock(object):
         except IOError:
             return False
 
-
     def acquire(self):
         """
-        Acquire the lock, if possible. If the lock is in use, it check again
-        every `wait` seconds. It does this until it either gets the lock or
-        exceeds `timeout` number of seconds, in which case it throws
-        an exception.
-
+        Attempts to acquire the lock, and returns true if successful. Returns true if we already had the lock.
         :return:
-        """
-
+        """r
         # Try to open the lock file
         fp = None
         try:
@@ -58,15 +53,13 @@ class FileLock(object):
         except IOError:
             fp = open(self._lockfile, "w")
             fp.write(self.uuid)
-            return True
-
-        # If the file does exist, return true if it has our uuid otherwise false
-        else:
-            return fp.read() == self.uuid
 
         # Make sure the file is closed before we leave
         finally:
             if fp: fp.close()
+
+        # Perform check to see if we have lock and return result (second check to make sure created file is there)
+        return bool(self.is_locked)
 
     def release(self, force_release: bool=False):
         """
