@@ -43,7 +43,7 @@ class FileLock(object):
         """
         Attempts to acquire the lock, and returns true if successful. Returns true if we already had the lock.
         :return:
-        """r
+        """
         # Try to open the lock file
         fp = None
         try:
