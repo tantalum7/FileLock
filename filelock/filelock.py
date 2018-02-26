@@ -1,8 +1,7 @@
 
 # Library imports
 import os
-import time
-import errno
+import uuid
 
 
 # Exceptions
@@ -12,7 +11,7 @@ class FileLockException(Exception):
 
 class FileLock(object):
 
-    def __init__(self, file_name: str, timeout: float=10, delay: float=0.05):
+    def __init__(self, file_path: str):
         """
         A file locking mechanism that has context-manager support so
         you can use it in a with statement. This should be relatively cross
@@ -25,14 +24,20 @@ class FileLock(object):
         :param delay:
         """
         self._is_locked = False
-        self.lockfile = os.path.join(os.getcwd(), "%s.lock" % file_name)
-        self.file_name = file_name
-        self.timeout = timeout
-        self.delay = delay
+        self._lockfile = os.path.join(os.path.dirname(file_path), os.path.basename(file_path)+".lock")
+        self.uuid = str(uuid.uuid4())
 
     @property
     def is_locked(self) -> bool:
-        return self._is_locked
+        # Try to open the lock file, if it exists then return true if it contents our uuid
+        try:
+            with open(self._lockfile, "r") as fp:
+                return fp.read() == self.uuid
+
+        # Lock file doesn't exist, so it isn't locked. Return false
+        except IOError:
+            return False
+
 
     def acquire(self):
         """
@@ -43,33 +48,25 @@ class FileLock(object):
 
         :return:
         """
-        # Fetch start time (now)
-        start_time = time.time()
 
-        # Start looping to try and get the file lock
-        while True:
+        # Try to open the lock file
+        fp = None
+        try:
+            fp = open(self._lockfile, "r+")
 
-            # Try to create the lock file and open it
-            try:
-                self.fd = os.open(self.lockfile, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        # If the file doesn't exist, create it and return true (we have the lock)
+        except IOError:
+            fp = open(self._lockfile, "w")
+            fp.write(self.uuid)
+            return True
 
-            # Catch all OSError exceptions
-            except OSError as e:
+        # If the file does exist, return true if it has our uuid otherwise false
+        else:
+            return fp.read() == self.uuid
 
-                # If the OSError is anything other than "file already exists error", reraise
-                if e.errno != errno.EEXIST:
-                    raise
-
-                # If we have exceeded the timeout duration, raise an exception
-                if start_time + self.timeout > time.time():
-                    raise FileLockException("Timeout occured.")
-
-                # We haven't timed out yet, but still can't get the lock.
-                # Sleep for the delay duration, before we loop round and try again
-                time.sleep(self.delay)
-
-        # If we get here, we finally managed to get the lock. Set the flag true
-        self._is_locked = True
+        # Make sure the file is closed before we leave
+        finally:
+            if fp: fp.close()
 
     def release(self, force_release: bool=False):
         """
@@ -81,9 +78,7 @@ class FileLock(object):
         """
         # If we have the lock, delete the lock file and clear the is locked flag
         if self.is_locked or force_release:
-            os.close(self.fd)
-            os.unlink(self.lockfile)
-            self._is_locked = False
+            os.remove(self._lockfile)
 
     def __enter__(self):
         """
